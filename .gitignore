@@ -1,0 +1,7 @@
+.DS_Store
+.obsidian/
+*.tmp
+*.bin
+*.log
+/pkg/downloader/*.tmp
+/pkg/downloader/*.bin
