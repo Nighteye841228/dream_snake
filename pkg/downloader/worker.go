@@ -8,15 +8,26 @@ import (
 	"os"
 )
 
-// DownloadTask implements the aixflow.Task interface, responsible for 
+// defaultClient is shared across DownloadTasks that do not inject their own client.
+// Reusing a single client preserves the underlying connection pool, which matters
+// when many chunks target the same host.
+var defaultClient = &http.Client{}
+
+// DownloadTask implements the aixflow.Task interface, responsible for
 // downloading a single file chunk and writing it to a temporary file.
 type DownloadTask struct {
 	URL      string
 	Chunk    Chunk
 	TempPath string
+
+	// Client is optional. When nil, a shared default client is used.
+	// [MANUAL INTERVENTION POINT: Transport Tuning]
+	// The Senior Engineer should inject a tuned *http.Client (timeouts, MaxIdleConns,
+	// proxy, TLS config) when running against production endpoints.
+	Client *http.Client
 }
 
-// NewDownloadTask initializes a new DownloadTask.
+// NewDownloadTask initializes a new DownloadTask using the shared default client.
 func NewDownloadTask(url string, chunk Chunk, tempPath string) *DownloadTask {
 	return &DownloadTask{
 		URL:      url,
@@ -25,7 +36,7 @@ func NewDownloadTask(url string, chunk Chunk, tempPath string) *DownloadTask {
 	}
 }
 
-// Execute performs the download logic. It writes data to a temporary path, 
+// Execute performs the download logic. It writes data to a temporary path,
 // adhering to the principle of side-effect isolation.
 func (t *DownloadTask) Execute(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.URL, nil)
@@ -36,7 +47,10 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 	// Set the Range header for chunked download
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", t.Chunk.Start, t.Chunk.End))
 
-	client := &http.Client{}
+	client := t.Client
+	if client == nil {
+		client = defaultClient
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("request execution failed: %w", err)

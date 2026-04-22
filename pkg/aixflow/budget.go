@@ -2,7 +2,6 @@ package aixflow
 
 import (
 	"context"
-	"errors"
 	"time"
 )
 
@@ -28,19 +27,16 @@ func NewBudgetedRunner(base Runner, timeout time.Duration) *BudgetedRunner {
 }
 
 // Run executes the task within the specified time budget.
-// If the budget is exceeded, the context is canceled, triggering the Task's 
+// If the budget is exceeded, the context is canceled, triggering the Task's
 // internal timeout handling and subsequent Undo logic.
+//
+// [MANUAL INTERVENTION POINT: Budget Calibration]
+// In the AI era, infinite loops or stalled I/O are real risks. The Senior Engineer
+// MUST calibrate Timeout based on the worst acceptable latency for the wrapped Task —
+// AI-generated tasks should never run unbounded.
 func (r *BudgetedRunner) Run(ctx context.Context, task Task) error {
 	budgetCtx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
 
-	err := r.Base.Run(budgetCtx, task)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			// In the AI era, infinite loops or stalled I/O are risks; 
-			// budget enforcement is critical.
-		}
-		return err
-	}
-	return nil
+	return r.Base.Run(budgetCtx, task)
 }
