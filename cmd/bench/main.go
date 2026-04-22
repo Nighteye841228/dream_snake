@@ -26,10 +26,11 @@ const (
 
 // BenchTask wraps a core task to simulate various logging overheads and error scenarios.
 type BenchTask struct {
-	Task      aixflow.Task
-	LogMode   LogMode
-	LogFile   string
-	ShouldErr bool
+	Task        aixflow.Task
+	LogMode     LogMode
+	LogFile     string
+	ShouldErr   bool
+	SmartLogger *aixflow.SmartLogger
 }
 
 func (t *BenchTask) Execute(ctx context.Context) error {
@@ -41,13 +42,11 @@ func (t *BenchTask) Execute(ctx context.Context) error {
 			logger.Printf("Executing task... timestamp=%v, context=%+v, metadata=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", time.Now(), ctx)
 		}
 		f.Close()
-	} else if t.LogMode == SmartLog {
-		// Simulate memory-based Ring Buffer logging.
-		buffer := make([]string, 0, 5000)
+	} else if t.LogMode == SmartLog && t.SmartLogger != nil {
+		// Use the official SmartLogger to simulate memory-based logging.
 		for i := 0; i < 5000; i++ {
-			buffer = append(buffer, fmt.Sprintf("Executing task... timestamp=%v", time.Now()))
+			t.SmartLogger.Log(fmt.Sprintf("Executing task... timestamp=%v, context=%+v, metadata=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", time.Now(), ctx))
 		}
-		_ = buffer
 	}
 
 	err := t.Task.Execute(ctx)
@@ -62,11 +61,9 @@ func (t *BenchTask) Execute(ctx context.Context) error {
 }
 
 func (t *BenchTask) Undo(ctx context.Context) error {
-	if t.LogMode == SmartLog {
-		// Simulate dumping memory logs to disk only upon failure.
-		f, _ := os.OpenFile(t.LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		f.WriteString("Dumping smart log to disk due to Error Flag...\n")
-		f.Close()
+	if t.LogMode == SmartLog && t.SmartLogger != nil {
+		// Dump memory logs to disk only upon failure.
+		_ = t.SmartLogger.Dump(t.LogFile)
 	}
 	return t.Task.Undo(ctx)
 }
@@ -108,6 +105,11 @@ func runDownloadChunks(tsURL string, destDir string, totalSize int64, chunkSize 
 	start := time.Now()
 	runner := aixflow.NewAtomicRunner()
 	ctx := context.Background()
+	
+	var sLogger *aixflow.SmartLogger
+	if logMode == SmartLog {
+		sLogger = aixflow.NewSmartLogger(10000)
+	}
 
 	chunks, err := downloader.CalculateChunks(totalSize, chunkSize)
 	if err != nil {
@@ -121,10 +123,11 @@ func runDownloadChunks(tsURL string, destDir string, totalSize int64, chunkSize 
 
 		baseTask := downloader.NewDownloadTask(tsURL, chunk, chunkPath)
 		benchTask := &BenchTask{
-			Task:      baseTask,
-			LogMode:   logMode,
-			LogFile:   logPath,
-			ShouldErr: chunk.Index == failChunkIndex,
+			Task:        baseTask,
+			LogMode:     logMode,
+			LogFile:     logPath,
+			ShouldErr:   chunk.Index == failChunkIndex,
+			SmartLogger: sLogger,
 		}
 		
 		if err := runner.Run(ctx, benchTask); err != nil {
